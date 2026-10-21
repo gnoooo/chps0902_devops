@@ -59,6 +59,74 @@ jobs:
       - name: mpirun direct
         run: mpirun --allow-run-as-root --oversubscribe -np 4 ./build/bcast
 
+  # le runner heberge tourne sur le noeud de login du cluster GCP
+  test_hpc:
+    needs: build
+    runs-on: [self-hosted, hpc-login]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # on recompile ici, l'environnement cible n'a pas la meme ABI que le conteneur
+      - name: build sur le noeud de login
+        run: |
+          source /etc/profile.d/z00_lmod.sh
+          module load cmake openmpi
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+
+      - name: soumission et polling
+        run: |
+          source /etc/profile.d/z00_lmod.sh
+          module load openmpi
+          JOBID=$(sbatch --parsable slurm/job_ci.sh)
+          echo "job soumis $JOBID"
+          while true; do
+            STATE=$(sacct -j "$JOBID" -n -o State | head -1 | tr -d ' ')
+            echo "$(date +%H:%M:%S) job $JOBID $STATE"
+            case "$STATE" in
+              COMPLETED|FAILED|TIMEOUT|CANCELLED|NODE_FAIL|OUT_OF_MEMORY) break ;;
+            esac
+            sleep 30
+          done
+          cat "ci-$JOBID.out" || true
+          test "$(sacct -j "$JOBID" -n -o ExitCode | head -1 | cut -d: -f1)" -eq 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hpc-logs
+          path: ci-*.out
+          retention-days: 7
+
+  # meme chose en trois lignes, lancee a la main pour comparer
+  test_hpc_wait:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, hpc-login]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build sur le noeud de login
+        run: |
+          source /etc/profile.d/z00_lmod.sh
+          module load cmake openmpi
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+
+      - name: sbatch wait
+        run: |
+          source /etc/profile.d/z00_lmod.sh
+          module load openmpi
+          sbatch --wait slurm/job_ci.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hpc-logs-wait
+          path: ci-*.out
+          retention-days: 7
+
   lint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
