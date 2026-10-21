@@ -15,5 +15,8 @@ cd "$SLURM_SUBMIT_DIR"
 for f in 01-spack z00_lmod z00_spack_lmod; do . "/etc/profile.d/$f.sh"; done
 module load openmpi
 
-srun ./build/bcast
+# openmpi de Spack est compile --without-slurm, srun lance donc une tâche isolee
+# par noeud et chaque rang croit etre seul, on passe la liste des noeuds a mpirun
+HOSTS=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | paste -sd,)
+mpirun --host "$HOSTS" -np "$SLURM_NTASKS" ./build/bcast
 echo "SUCCESS: test MPI passe sur $(scontrol show hostnames "$SLURM_JOB_NODELIST" | tr '\n' ' ')"
