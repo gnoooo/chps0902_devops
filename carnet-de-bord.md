@@ -154,65 +154,196 @@ Ce que je referais autrement, écrire les conditions dans un seul fichier dès l
 
 ### Ce qui a été fait
 
-TODO
+Le cluster du Cours 5 a été redéployé sur GCP avec le blueprint `hpc-slurm.yaml` du Cluster Toolkit. Il donne un noeud de login avec une IP publique, deux noeuds de calcul de la partition `debug`, et un `/home` partagé par Filestore.
+
+Le pare-feu du réseau n'ouvre le port 22 qu'aux plages IAP de Google. Un runner hébergé par GitHub ne peut donc pas se connecter au login par SSH. J'ai installé un runner auto-hébergé sur le noeud de login, avec le label `hpc-login` et un service systemd.
+
+Deux jobs utilisent ce runner. `test_hpc` compile sur le login, soumet `slurm/job_ci.sh` avec `sbatch --parsable`, puis interroge `sacct` toutes les trente secondes jusqu'à un état terminal. Il porte `timeout-minutes: 45` et publie `ci-*.out` avec `if: always()`. `test_hpc_wait` fait la même chose en une ligne avec `sbatch --wait` et ne tourne que sur `workflow_dispatch`, pour comparer les deux façons d'attendre.
+
+Le script `slurm/job_ci.sh` porte les en-têtes SBATCH, charge Lmod, reconstruit la liste des noeuds avec `scontrol show hostnames`, puis lance `mpirun` sur cette liste.
+
+Le build n'est pas réutilisé depuis le conteneur. Le binaire du conteneur Debian ne tourne pas sur Rocky Linux avec l'OpenMPI de Spack, il faut recompiler avec les modules du cluster.
 
 ### Preuves
 
-TODO
+Run 39582070775, job `test_hpc` :
+
+```
+job soumis 10
+10:07:07 job 10 PENDING
+10:07:37 job 10 RUNNING
+10:08:07 job 10 RUNNING
+10:08:37 job 10 COMPLETED
+rang 0 recoit 0
+MPI_Bcast OK sur 2 rangs
+rang 1 recoit 0
+SUCCESS: test MPI passe sur hpcslurm-debugnodeset-0 hpcslurm-debugnodeset-1
+```
+
+Run 39582567650, job `test_hpc_wait`, même commit, même script :
+
+```
+10:10:28 Submitted batch job 11
+10:17:02 sbatch: error: Job 11 no longer found and exit code not found
+```
+
+Le job 11 était encore dans la file à ce moment. Il a tourné plus tard, et son fichier est arrivé après l'envoi de l'artefact :
+
+```
+$ sacct -j 11 -o JobID,Start,End,State,ExitCode
+11  2026-10-21T10:22:51  2026-10-21T10:22:53  COMPLETED  0:0
+```
+
+L'artefact `hpc-logs-wait` n'a donc pas été produit, avec le message `No files were found with the provided path: ci-*.out`. Le job a réussi, la CI n'en a rien su.
 
 ### Erreurs et résolutions
 
-TODO
+Première erreur, `module load cmake` répond `unknown module` dans le job. Un shell non interactif ne lit pas `/etc/profile`, donc `MODULEPATH` ne contient pas les modules de Spack. Résolution, déclarer `shell: bash -l {0}` sur les étapes, ce qui lance un shell de connexion.
+
+Deuxième erreur, le job Slurm reste PENDING indéfiniment. `scontrol show job` donne `Reason=PartitionConfig`. Le job demandait quatre tâches, soit par défaut 29,5 Go de mémoire, alors que la partition entière n'a que deux coeurs, 15 Go de mémoire réelle et `Exclusive=NODE`. Résolution, une tâche par noeud et `--mem=0`, ce qui laisse Slurm compter la mémoire du noeud entier.
+
+Troisième erreur, la sortie du job est invisible depuis le login. `#SBATCH -o /tmp/...` écrit sur le disque local du noeud de calcul, pas sur le Filestore partagé. Résolution, écrire dans le répertoire de soumission, qui est sur `/home`.
+
+Quatrième erreur, plus instructive. Le job passe, mais affiche `MPI_Bcast OK sur 1 rangs`, et chaque rang croit être seul. `srun -n 2 ./hello` affiche deux fois `rang 0 sur 1`. `ompi_info` montre que l'OpenMPI de Spack est compilé `--without-slurm`. `srun` lance bien deux tâches, mais aucune ne reçoit son rang dans l'environnement PMIx, donc chaque processus démarre comme un monde MPI à un rang. La solution évidente serait `srun --mpi=pmix`, mais l'installation n'a pas le support Slurm. J'ai donc gardé `srun` pour l'allocation et lancé `mpirun --host` sur la liste des noeuds. Le test affiche maintenant deux rangs distincts, un par noeud.
 
 ### Réponses aux questions de cadrage
 
 Pourquoi le job CI doit-il porter un timeout alors que le job Slurm a déjà son wall-time ?
 
-TODO
+Le wall-time est un contrat avec Slurm, il ne couvre que l'exécution, à partir du moment où le job démarre. Il ne couvre ni la file d'attente, ni le démarrage des noeuds, ni la soumission, ni la remontée des artefacts. Un job bloqué en PENDING ne consomme jamais son wall-time, il peut donc rester en file indéfiniment sans que Slurm ne le tue.
+
+Le timeout de la CI couvre toute l'étape, attente comprise. Sans lui, le runner auto-hébergé reste occupé par un job qui n'avance plus. Ici il n'y a qu'un runner, donc un job bloqué bloque tout le dépôt, ce qui est arrivé pendant les essais. La valeur doit se lire comme attente maximale plus wall-time plus marge. Ici quarante-cinq minutes pour dix minutes de calcul.
 
 Le job reste PENDING vingt minutes, que se passe-t-il côté CI et comment le rendre observable ?
 
-TODO
+La CI ne voit qu'une suite d'états identiques, et rien ne distingue une file lente d'un job oublié. Le runner reste occupé, les artefacts ne remontent pas, et le pipeline ne rend pas la main. Sans timeout, l'étape ne finit jamais.
+
+Ce qui rend la chose observable, c'est d'écrire l'horodatage et la raison à chaque tour. J'ai ajouté `squeue -o %r`, qui affiche `PartitionConfig`, `Resources` ou `Priority`, et qui dit donc si la demande est impossible ou si elle attend son tour. J'ajoute aussi un timeout court pour la file, distinct de celui du calcul, et l'envoi du log en artefact systématique. Une file qui dépasse le seuil peut alors être annulée avec un message clair au lieu d'expirer sans explication.
 
 Le nightly échoue à 2 h du matin, trois questions avant de relancer, et distinction entre échec de code et échec d'infrastructure.
 
-TODO
+Trois questions avant de relancer. Le job a-t-il démarré, ou est-il resté en file ? Le même commit passe-t-il à la main ? L'échec est-il reproductible, ou vu une seule fois ?
+
+La distinction se fait sur deux sources. `sacct` donne l'état final. `NODE_FAIL`, `TIMEOUT`, `OUT_OF_MEMORY`, `CANCELLED` ou `PREEMPTED` désignent l'infrastructure. `FAILED` avec un code de sortie non nul désigne le code, ou l'environnement, car le programme a tourné et a rendu son verdict. Le journal du job complète, un échec à la compilation ou un module absent n'est pas un échec du calcul.
+
+Ensuite, la réponse dépend du diagnostic. Un incident d'infrastructure se relance tel quel, sans toucher au code. Un échec de code se corrige avant de relancer, sinon on relance une erreur. Un test instable, qui passe deux fois sur trois, se relance mais se documente, sinon il use la confiance dans le pipeline. Dans les trois cas, je note l'heure, l'identifiant du run et l'identifiant du job Slurm, parce que sans eux l'incident est impossible à relire une semaine plus tard.
 
 ### Bilan
 
-TODO
+Ce qui fonctionne, la CI soumet un vrai job Slurm, suit son état et récupère sa sortie, sur un cluster privé qui n'est pas joignable depuis Internet.
+
+Ce qui ne fonctionne pas, `sbatch --wait` ne rend pas la main correctement quand le job attend en file, il rend une erreur alors que le job est encore vivant. Le polling est plus verbeux mais plus honnête.
+
+Ce que je referais autrement, vérifier la raison d'attente dès la première soumission, un `PartitionConfig` se voit en une minute et m'a coûté deux runs.
 
 ## Mission 4 - Spack, l'environnement comme code
 
 ### Ce qui a été fait
 
-TODO
+Le cluster fournit déjà Spack dans `/opt/apps/spack`, comme sur ROMEO, donc je ne clone pas le dépôt officiel. Je travaille dans un environnement dédié, le répertoire `spack/` du dépôt.
+
+Le gcc 11.5.0 du système est déjà déclaré, `spack compiler find` répond `Found no new compilers`. Aucune compilation de compilateur. Les deux specs utilisent `%gcc`.
+
+Le fichier `spack/spack.yaml` déclare deux racines, `openmpi@5.0.8%gcc` et `cmake@3.31.9%gcc`, sur la cible `x86_64_v3`, avec `unify: true`. Il déclare aussi un upstream, l'arbre d'installation du cluster, et un arbre d'installation dans le home, car `/opt/apps/spack` n'est pas inscriptible.
+
+`spack -D spack concretize -f` produit `spack/spack.lock`. Les deux fichiers sont commités.
+
+`spack -D spack install` réutilise les paquets de l'upstream et ne compile rien. La vue de l'environnement fournit cmake et mpirun, le projet se configure, se compile et passe son test avec ces outils.
 
 ### Preuves
 
-TODO
+Vérification dans un clone neuf du dépôt, sur le noeud de login :
+
+```
+$ spack compiler find
+==> Found no new compilers
+
+$ spack -D spack concretize -f
+==> Updating view at /tmp/spack-repo/spack/.spack-env/view
+
+$ spack -D spack find
+==> In environment /tmp/spack-repo/spack
+==> 2 root specs
+-- no arch / no compilers ---------------------------------------
+[^] cmake@3.31.9
+[^] openmpi@5.0.8
+
+$ spack -D spack install | tail -1
+[+] /opt/apps/spack/opt/spack/[padded-to-128-chars]/linux-x86_64_v3/openmpi-5.0.8-z7iplfroyys323rngc7fvppi73d5smcj
+```
+
+Le marqueur `[^]` dit que la spec vient de l'upstream et le `[+]` dit qu'elle est installée. Chaque paquet de l'environnement donne une ligne `[+]` dans ce genre, et aucune ligne de compilation.
+
+```
+$ export PATH=spack/.spack-env/view/bin:$PATH
+$ mpirun --version | head -1
+mpirun (Open MPI) 5.0.8
+$ cmake -S . -B /tmp/b2 -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/b2 -j2
+[100%] Built target bcast
+$ mpirun --allow-run-as-root --oversubscribe -np 2 /tmp/b2/bcast
+rang 0 recoit 0
+rang 1 recoit 0
+MPI_Bcast OK sur 2 rangs
+```
+
+Extrait de `spack/spack.lock`, la racine openmpi :
+
+```
+"z7iplfroyys323rngc7fvppi73d5smcj":{"name":"openmpi","version":"5.0.8",
+ "arch":{"platform":"linux","platform_os":"rocky9","target":"x86_64_v3"},
+ "parameters":{"fortran":true,"schedulers":["none"],...},
+ "dependencies":[{"name":"prrte","hash":"y2cjdzyqbpyyyklpdhzod5oi5o6gesg7"},...]}
+```
+
+Remarque sur la reproductibilité. Après un second `concretize` dans un clone neuf, `git status` signale `spack/spack.lock` modifié. La comparaison des deux fichiers montre les mêmes hashes, la même version de Spack et les mêmes specs, seul l'ordre des deux racines change. Le contenu est identique.
 
 ### Erreurs et résolutions
 
-TODO
+Première erreur, `spack concretize` répond `argument '--force' requires an environment`. Depuis Spack 1.x, un répertoire qui contient un `spack.yaml` n'est pas un environnement pour toutes les commandes. Résolution, passer le répertoire avec `spack -D spack`.
+
+Deuxième erreur, le premier `concretize` tente de construire clingo et patchelf, puis échoue sur `PermissionError: '/opt/apps/spack/var/spack/cache/blobs'`. Le cache de Spack est dans l'installation système, en lecture seule. Résolution, `spack config add` sur `source_cache` et `misc_cache` vers `$HOME/.spack/cache`, puis `spack bootstrap now`. Les deux outils se téléchargent alors en binaire depuis le buildcache public en deux minutes.
+
+Troisième erreur, plus coûteuse. `spack install --cache-only` échoue avec `No binary found when cache-only was specified` et un avertissement `upstream not found: /opt/apps/spack/opt/spack/.spack-db/index.json`. Deux causes. Le buildcache public ne contient pas nos specs exactes. Surtout, l'arbre d'installation du cluster est padded, le vrai chemin contient quatre niveaux de `__spack_path_placeholder__` avant `linux-x86_64_v3`, donc la base de données n'est pas là où je la cherchais. Résolution, pointer l'upstream sur le chemin réel, les vingt paquets de l'environnement sont alors tous réutilisés.
+
+Quatrième erreur, la cible. Sur le noeud de login, Spack détecte `zen2`, alors que la pile du cluster est installée pour `x86_64_v3`. Aucun hash ne correspond, donc il veut tout recompiler. Résolution, écrire `target=x86_64_v3` dans les deux specs. Un `openmpi` compilé pour zen2 aurait aussi tourné sur les noeuds, mais il aurait été un second exemplaire inutile.
+
+Cinquième erreur, moins grave. Le réglage `packages: all: compiler` est déprécié depuis Spack 1.0 et ignoré, avec l'avertissement `has been deprecated in Spack v1.0, and is currently ignored`. Résolution, supprimer ce bloc et choisir le compilateur dans la spec avec `%gcc`, ce que l'énoncé demande de toute façon.
 
 ### Réponses aux questions de cadrage
 
 Syntaxe d'une spec complète, exemple de hdf5 compilé avec GCC, MPI activé, Fortran activé, C++ désactivé.
 
-TODO
+```
+hdf5@1.14.5%gcc@11.5.0+mpi+fortran~cxx
+```
+
+Le nom vient en premier. `@1.14.5` fixe la version, une plage comme `@1.14:` serait acceptée et laissée au concretizer. `%gcc@11.5.0` choisit le compilateur, la version est facultative. `+mpi` et `+fortran` activent deux variants, ce qui ajoute les dépendances correspondantes, ici le fournisseur MPI et un compilateur Fortran. `~cxx` désactive le variant C++, donc pas d'interface C++. Le fournisseur MPI se précise avec une dépendance, par exemple `^openmpi@5.0.8`, sinon le concretizer prend le premier de sa liste de préférence. La spec complète et lisible donne `hdf5@1.14.5%gcc@11.5.0+mpi+fortran~cxx ^openmpi@5.0.8`.
 
 Pourquoi `spack.lock` suffit à reproduire l'environnement et pourquoi `spack.yaml` seul ne suffit pas ?
 
-TODO
+`spack.yaml` décrit une intention. Il donne des noms, des plages de versions, des variants souhaités, un compilateur, et des préférences. Il ne dit pas quelle version de chaque dépendance sera retenue, ni dans quel ordre, ni avec quels patches.
+
+`spack.lock` décrit le résultat. Pour chaque paquet, il donne la version exacte, la cible, le compilateur, tous les variants, les patches et le hash qui identifie le binaire. Il donne aussi le graphe des dépendances, paquet par paquet.
+
+Une concretisation dépend du dépôt de recettes du jour, des préférences par défaut, de la machine et du compilateur. Le même `spack.yaml` concrétisé dans six mois peut choisir une version plus récente d'une dépendance et produire un autre graphe. `spack.lock` supprime cette liberté, `spack install` installe alors exactement ce qui est écrit, et le hash reste le même d'une machine à l'autre pour une même cible.
+
+Les deux fichiers ne servent donc pas à la même chose, et c'est pour cela qu'on versionne les deux. Le yaml explique l'intention, le lock garantit le résultat, et le diff du lock dans une revue montre ce qui a réellement changé dans la pile.
 
 Quel intérêt du buildcache pour un pipeline qui installe l'environnement à chaque exécution ?
 
-TODO
+Sans buildcache, chaque exécution repart des sources. OpenMPI et ses dépendances demandent des dizaines de minutes de compilation, à chaque pipeline, pour un résultat toujours identique puisque le lock ne change pas. C'est du calcul pur perdu, et cela impose des runners puissants pour rien.
+
+Avec un buildcache, les paquets sont téléchargés en binaire puis installés par copie. L'étape passe de dizaines de minutes à quelques dizaines de secondes, et le pipeline peut se permettre de repartir d'un environnement propre à chaque exécution, ce qui est la seule façon d'être sûr que l'environnement décrit fonctionne encore.
+
+Deux limites. Le cache doit contenir le hash exact, une spec différente ne correspond à aucun binaire et Spack retombe sur les sources. Et un buildcache accélère, il ne garantit rien, c'est le lock qui garantit. Un cache sans lock donne des installations rapides et non reproductibles.
 
 ### Bilan
 
-TODO
+Ce qui fonctionne, un environnement décrit par deux fichiers de soixante lignes, concrétisé en une minute et installé sans recompiler, avec cmake et OpenMPI prêts pour le projet.
+
+Ce qui ne fonctionne pas, une installation complète depuis les sources n'est pas réaliste sur un noeud de login à un coeur, et le buildcache public ne contient pas les specs exactes de ce cluster.
+
+Ce que je referais autrement, vérifier la cible et le chemin réel de l'upstream avant de lancer la première installation, ces deux détails m'ont coûté trois essais.
 
 ## Correspondance GitLab
 
@@ -240,12 +371,51 @@ Une variable protégée n'a pas d'équivalent direct, le plus proche est un envi
 
 Acquis :
 
-TODO
+Un pipeline qui construit, teste, analyse et empaquette un projet C et MPI, avec des artefacts et des dépendances entre jobs. Je sais maintenant pourquoi un test doit tourner dans le même environnement que la compilation, et pourquoi un binaire ne traverse pas deux distributions.
+
+Les déclencheurs. Une règle par événement, une condition sur la référence, et un secret qui reste masqué dans les journaux même quand on l'affiche volontairement.
+
+Un runner auto-hébergé sur un noeud de login, et la raison de ce choix, ici un pare-feu qui n'accepte que IAP.
+
+La chaîne CI vers Slurm. Soumettre avec `--parsable`, suivre l'état avec `sacct`, lire la raison d'attente avec `squeue -o %r`, distinguer un échec de code d'un échec d'infrastructure.
+
+Un environnement Spack décrit par deux fichiers, compris comme une intention plus un résultat, avec la réutilisation d'un upstream et l'idée du buildcache.
 
 Points à retravailler :
 
-TODO
+L'attente d'un job Slurm. `sbatch --wait` m'a donné une erreur alors que le job était vivant, je veux écrire un polling robuste avec un délai maximal propre à la file, distinct du wall-time.
+
+Le buildcache pour de vrai. Je sais l'expliquer, je ne l'ai pas encore fabriqué, ni poussé, ni consommé depuis un dépôt d'équipe.
+
+Les variants MPI de Spack. Choisir un fournisseur MPI avec `^openmpi`, et comprendre l'effet des variants `fortran`, `cuda` ou `internal-pmix` sur un vrai calcul.
+
+La lecture d'un `spack.lock`. Le fichier fait soixante kilo-octets de JSON sur une ligne, je sais le comparer, pas encore l'utiliser pour expliquer un changement de pile en revue.
+
+Le coût. Un cluster qui tourne sans calcul coûte de l'argent, et le réflexe de détruire en fin de séance doit devenir un automatisme, avec une vérification des instances restantes.
 
 Usage dans mes activités CHPS :
 
-TODO
+Pour un code de recherche, la valeur est de séparer deux choses qui se mélangent souvent, l'environnement et le code. Un `spack.yaml` et un `spack.lock` dans le dépôt disent avec quoi le calcul tourne, le carnet dit ce qui a été essayé et pourquoi.
+
+Pour un calcul lourd, la chaîne CI vers Slurm permet de tester petit sur un conteneur, puis de lancer le vrai calcul sur la partition adaptée, avec un journal et des artefacts qui restent.
+
+Pour un rendu ou une publication, le carnet et l'historique Git donnent la trace des erreurs, ce qui vaut mieux qu'un résultat propre sans explication.
+
+## Mission 5 - Rendu
+
+Le dépôt est public, il se clone donc sans invitation ni compte :
+
+```
+git clone https://github.com/gnoooo/chps0902_visualization_devops
+```
+
+Le tag `seance-inversee` marque l'état rendu, carnet compris :
+
+```
+git tag -l
+git checkout seance-inversee
+```
+
+Le carnet est le fichier `carnet-de-bord.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
+
+
