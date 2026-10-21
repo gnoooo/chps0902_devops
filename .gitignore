@@ -1,0 +1,13 @@
+# supports de cours, hors livrable
+*.pdf
+mpi_bandwidth.c
+
+# sorties de build et de jobs
+build/
+slurm-*.out
+ci-*.out
+*.tar.gz
+checksums.txt
+
+# artefacts spack
+.spack-env/

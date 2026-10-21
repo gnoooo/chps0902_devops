@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: gcc:13-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: dependances
+        run: apt-get update && apt-get install -y cmake libopenmpi-dev
+
+      - name: configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: compilation
+        run: cmake --build build -j"$(nproc)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: build/
+          retention-days: 7
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    container: gcc:13-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: build/
+
+      - name: dependances
+        run: apt-get update && apt-get install -y cmake libopenmpi-dev
+
+      # dans le conteneur CI on est root et le runner a peu de coeurs
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure
+        env:
+          OMPI_ALLOW_RUN_AS_ROOT: 1
+          OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+          OMPI_MCA_rmaps_base_oversubscribe: 1
+
+      - name: mpirun direct
+        run: mpirun --allow-run-as-root --oversubscribe -np 4 ./build/bcast
+
+  lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+          cppcheck --enable=warning,style --error-exitcode=1 src/
+
+  package:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: build/
+
+      - name: tarball
+        run: |
+          tar czf bcast-${GITHUB_REF_NAME}.tar.gz -C build bcast
+          sha256sum bcast-${GITHUB_REF_NAME}.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: |
+            bcast-*.tar.gz
+            checksums.txt
+
+  secret_demo:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      # registre bidon : l'echec est attendu, seul le non affichage du secret compte
+      - name: login avorté avec le secret
+        run: echo "$FAKE_REGISTRY_TOKEN" | docker login -u user --password-stdin registry.invalid || true
+        env:
+          FAKE_REGISTRY_TOKEN: ${{ secrets.FAKE_REGISTRY_TOKEN }}
+
+      - name: le secret n'apparait pas
+        run: |
+          test -n "$FAKE_REGISTRY_TOKEN"
+          echo "secret present en variable, non affiche dans les logs"
+        env:
+          FAKE_REGISTRY_TOKEN: ${{ secrets.FAKE_REGISTRY_TOKEN }}
