@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: dependances
-        run: apt-get update && apt-get install -y cmake libopenmpi-dev
+        run: apt-get update && apt-get install -y --no-install-recommends cmake libopenmpi-dev
 
       - name: configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -42,7 +42,7 @@ jobs:
           path: build/
 
       - name: dependances
-        run: apt-get update && apt-get install -y cmake libopenmpi-dev
+        run: apt-get update && apt-get install -y --no-install-recommends cmake libopenmpi-dev
 
       # dans le conteneur CI on est root et le runner a peu de coeurs
       - name: ctest
