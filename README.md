@@ -446,35 +446,35 @@ Une variable protégée n'a pas d'équivalent direct, le plus proche est un envi
 
 Acquis :
 
-Un pipeline qui construit, teste, analyse et empaquette un projet C et MPI, avec des artefacts et des dépendances entre jobs. Je sais maintenant pourquoi un test doit tourner dans le même environnement que la compilation, et pourquoi un binaire ne traverse pas deux distributions.
-
-Les déclencheurs. Une règle par événement, une condition sur la référence, et un secret qui reste masqué dans les journaux même quand on l'affiche volontairement.
-
-Un runner auto-hébergé sur un noeud de login, et la raison de ce choix, ici un pare-feu qui n'accepte que IAP.
-
-La chaîne CI vers Slurm. Soumettre avec `--parsable`, suivre l'état avec `sacct`, lire la raison d'attente avec `squeue -o %r`, distinguer un échec de code d'un échec d'infrastructure.
-
-Un environnement Spack décrit par deux fichiers, compris comme une intention plus un résultat, avec la réutilisation d'un upstream et l'idée du buildcache.
+> Un pipeline qui construit, teste, analyse et empaquette un projet C et MPI, avec des artefacts et des dépendances entre jobs. Je sais maintenant pourquoi un test doit tourner dans le même environnement que la compilation, et pourquoi un binaire ne traverse pas deux distributions.
+>
+> Les déclencheurs : une règle par événement, une condition sur la référence, et un secret qui reste masqué dans les journaux même quand on l'affiche volontairement.
+>
+> Un runner auto-hébergé sur un noeud de login, et la raison de ce choix, ici un pare-feu qui n'accepte que IAP.
+>
+> La chaîne CI vers Slurm : soumettre avec `--parsable`, suivre l'état avec `sacct`, lire la raison d'attente avec `squeue -o %r`, distinguer un échec de code d'un échec d'infrastructure.
+>
+> Un environnement Spack décrit par deux fichiers, compris comme une intention plus un résultat, avec la réutilisation d'un upstream et l'idée du buildcache.
 
 Points à retravailler :
 
-L'attente d'un job Slurm. `sbatch --wait` m'a donné une erreur alors que le job était vivant, je veux écrire un polling robuste avec un délai maximal propre à la file, distinct du wall-time.
-
-Le buildcache pour de vrai. Je sais l'expliquer, je ne l'ai pas encore fabriqué, ni poussé, ni consommé depuis un dépôt d'équipe.
-
-Les variants MPI de Spack. Choisir un fournisseur MPI avec `^openmpi`, et comprendre l'effet des variants `fortran`, `cuda` ou `internal-pmix` sur un vrai calcul.
-
-La lecture d'un `spack.lock`. Le fichier fait soixante kilo-octets de JSON sur une ligne, je sais le comparer, pas encore l'utiliser pour expliquer un changement de pile en revue.
-
-Le coût. Un cluster qui tourne sans calcul coûte de l'argent, et le réflexe de détruire en fin de séance doit devenir un automatisme, avec une vérification des instances restantes.
+> L'attente d'un job Slurm : `sbatch --wait` m'a donné une erreur alors que le job était vivant, je veux écrire un polling robuste avec un délai maximal propre à la file, distinct du wall-time.
+>
+> Le buildcache : j'ai compris le principe, je ne l'ai pas encore fabriqué, ni poussé, ni consommé depuis un dépôt d'équipe.
+>
+> Les variants MPI de Spack : choisir un fournisseur MPI avec `^openmpi`, et comprendre l'effet des variants `fortran`, `cuda` ou `internal-pmix` sur un vrai calcul.
+>
+> La lecture d'un `spack.lock` : le fichier fait soixante kilo-octets de JSON sur une ligne, je sais le comparer, pas encore l'utiliser pour expliquer un changement de pile en revue.
+>
+> Le coût : un cluster qui tourne sans calcul coûte de l'argent, et le réflexe de détruire en fin de séance doit devenir un automatisme, avec une vérification des instances restantes.
 
 Usage dans mes activités CHPS :
 
-Pour un code de recherche, la valeur est de séparer deux choses qui se mélangent souvent, l'environnement et le code. Un `spack.yaml` et un `spack.lock` dans le dépôt disent avec quoi le calcul tourne, le carnet dit ce qui a été essayé et pourquoi.
+> Pour un code de recherche, la valeur est de séparer deux choses qui se mélangent souvent, l'environnement et le code. Un `spack.yaml` et un `spack.lock` dans le dépôt disent avec quoi le calcul tourne, le carnet dit ce qui a été essayé et pourquoi.
 
-Pour un calcul lourd, la chaîne CI vers Slurm permet de tester petit sur un conteneur, puis de lancer le vrai calcul sur la partition adaptée, avec un journal et des artefacts qui restent.
+> Pour un calcul lourd, la chaîne CI vers Slurm permet de tester petit sur un conteneur, puis de lancer le vrai calcul sur la partition adaptée, avec un journal et des artefacts qui restent.
 
-Pour un rendu ou une publication, le carnet et l'historique Git donnent la trace des erreurs, ce qui vaut mieux qu'un résultat propre sans explication.
+> Pour un rendu ou une publication, le carnet et l'historique Git donnent la trace des erreurs, ce qui vaut mieux qu'un résultat propre sans explication.
 
 
 
