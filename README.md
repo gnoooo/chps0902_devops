@@ -288,6 +288,8 @@ Le fichier `spack/spack.yaml` déclare deux racines, `openmpi@5.0.8%gcc` et `cma
 
 `spack -D spack install` réutilise les paquets de l'upstream et ne compile rien. La vue de l'environnement fournit cmake et mpirun, le projet se configure, se compile et passe son test avec ces outils.
 
+Le buildcache est ensuite fabriqué et consommé pour de vrai, sur le même noeud de login, dans un second environnement `~/bc-demo` volontairement sans upstream. Sans upstream les paquets se compilent, c'est la condition pour avoir un binaire à mettre en cache. Le script `spack/buildcache-demo.sh` du dépôt enchaîne les cinq étapes, concrétiser, installer depuis les sources, pousser le binaire dans un miroir local, désinstaller, réinstaller avec `--cache-only`. Le miroir est un simple répertoire, il pourrait être un bucket ou un dépôt OCI.
+
 ### Preuves
 
 Vérification dans un clone neuf du dépôt, sur le noeud de login :
@@ -334,6 +336,32 @@ Extrait de `spack/spack.lock`, la racine openmpi :
 ```
 
 Remarque sur la reproductibilité. Après un second `concretize` dans un clone neuf, `git status` signale `spack/spack.lock` modifié. La comparaison des deux fichiers montre les mêmes hashes, la même version de Spack et les mêmes specs, seul l'ordre des deux racines change. Le contenu est identique.
+
+Démonstration du buildcache, avec `zlib` comme cobaye puisque ce paquet ne fait pas partie de l'upstream. La première installation compile, la seconde extrait l'archive.
+
+```
+$ time spack -D . install
+==> Installing gmake-4.4.1-ohsthau7wlphchdh2oa6oi2piplukjgk [5/6]
+  Install: 19.57s.  Total: 20.22s
+==> zlib: Successfully installed zlib-1.3.1-rlqkd7c
+  Build: 7.10s.  Install: 2.42s.  Total: 12.30s
+real    0m44.399s
+
+$ spack -D . buildcache create -u --update-index local zlib
+==> [1/4] Pushed gmake@4.4.1/ohsthau
+==> [2/4] Pushed gcc-runtime@11.5.0/h25nzw4
+==> [3/4] Pushed compiler-wrapper@1.0/ubrgzrg
+==> [4/4] Pushed zlib@1.3.1/rlqkd7c
+2.8M    /home/alban_pautre_gmail_com/bc-demo/mirror
+
+$ spack -D . install --cache-only --no-check-signature
+==> Extracting zlib-1.3.1-rlqkd7c from binary cache
+==> zlib: Successfully installed zlib-1.3.1-rlqkd7c
+  Fetch: 0.05s.  Install: 0.32s.  Total: 0.38s
+real    0m2.150s
+```
+
+Quarante-quatre secondes contre deux secondes, pour un miroir de 2,8 Mo qui contient quatre paquets. Un second passage du script donne 38 s puis 5 s, l'ordre de grandeur est stable. L'option `-u` signe le cache comme non signé, d'où le `--no-check-signature` à la consommation. Dans l'environnement réel `spack/`, ce cache n'est pas utilisé, tout vient de l'upstream, qui est un cache déjà installé et donc encore plus rapide.
 
 ### Erreurs et résolutions
 
@@ -395,9 +423,9 @@ Deux limites. Le cache doit contenir le hash exact, une spec différente ne corr
 
 Ce qui fonctionne : un environnement décrit par deux fichiers de soixante lignes, concrétisé en une minute et installé sans recompiler, avec cmake et OpenMPI prêts pour le projet.
 
-Ce qui ne fonctionne pas : une installation complète depuis les sources n'est pas réaliste sur un noeud de login à un coeur, et le buildcache public ne contient pas les specs exactes de ce cluster.
+Ce qui ne fonctionne pas : une installation complète depuis les sources n'est pas réaliste sur un noeud de login à un coeur, et le buildcache public ne contient pas les specs exactes de ce cluster, il faut donc fabriquer le sien puis le partager.
 
-Ce que je referais autrement : vérifier la cible et le chemin réel de l'upstream avant de lancer la première installation, ces deux détails m'ont coûté trois essais.
+Ce que je referais autrement : vérifier la cible et le chemin réel de l'upstream avant de lancer la première installation, ces deux détails m'ont coûté trois essais. Et mettre le miroir en place dès la première installation, plutôt que de le découvrir après coup.
 
 ## Mission 5 (rendu)
 
@@ -460,7 +488,7 @@ Points à retravailler :
 
 > L'attente d'un job Slurm : `sbatch --wait` m'a donné une erreur alors que le job était vivant, je veux écrire un polling robuste avec un délai maximal propre à la file, distinct du wall-time.
 >
-> Le buildcache : j'ai compris le principe, je ne l'ai pas encore fabriqué, ni poussé, ni consommé depuis un dépôt d'équipe.
+> Le buildcache : j'ai fabriqué, poussé et consommé un miroir local pour un paquet. Il reste à le faire pour la pile complète, à le signer et à le partager entre plusieurs machines.
 >
 > Les variants MPI de Spack : choisir un fournisseur MPI avec `^openmpi`, et comprendre l'effet des variants `fortran`, `cuda` ou `internal-pmix` sur un vrai calcul.
 >
