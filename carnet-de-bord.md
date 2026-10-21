@@ -162,6 +162,12 @@ Deux jobs utilisent ce runner. `test_hpc` compile sur le login, soumet `slurm/jo
 
 Le script `slurm/job_ci.sh` porte les en-têtes SBATCH, charge Lmod, reconstruit la liste des noeuds avec `scontrol show hostnames`, puis lance `mpirun` sur cette liste.
 
+Le cours demande de discuter `retry: when: runner_system_failure`. GitLab ne relance que sur une panne du runner, jamais sur un échec du script, et cette limite est la bonne. GitHub n'a pas ce filtre, la relance d'un job repart quel que soit l'échec, donc je ne l'active pas et je relance à la main avec `gh run rerun --failed`.
+
+Les deux échecs de la séance illustrent la règle. Le premier run a échoué sur `apt-get`, un gfortran absent de l'image, une relance aurait redonné la même erreur. Le job 11 a échoué côté CI alors que Slurm l'avait accepté, un problème de synchronisation, une relance aurait été légitime. On relance l'infrastructure, jamais le code.
+
+Pour l'attente, `sbatch --wait` convient quand on soumet à la main et qu'on regarde la file en même temps, le polling convient quand c'est la CI qui doit tenir le délai et expliquer l'attente.
+
 Le build n'est pas réutilisé depuis le conteneur. Le binaire du conteneur Debian ne tourne pas sur Rocky Linux avec l'OpenMPI de Spack, il faut recompiler avec les modules du cluster.
 
 ### Preuves
@@ -345,6 +351,27 @@ Ce qui ne fonctionne pas, une installation complète depuis les sources n'est pa
 
 Ce que je referais autrement, vérifier la cible et le chemin réel de l'upstream avant de lancer la première installation, ces deux détails m'ont coûté trois essais.
 
+## Mission 5 - Rendu
+
+Le dépôt est public, il se clone donc sans invitation ni compte :
+
+```
+git clone https://github.com/gnoooo/chps0902_visualization_devops
+```
+
+Le tag `seance-inversee` marque l'état rendu, carnet compris :
+
+```
+git tag -l
+git checkout seance-inversee
+```
+
+Le carnet est le fichier `carnet-de-bord.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
+
+Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite. Le dernier run vert complet est le run 39588631105, sur le commit `55028f9`. Les commits suivants ne touchent que le carnet.
+
+Les scripts de diagnostic écrits sur le noeud de login n'ont pas été commités et ont disparu avec le cluster. C'étaient un `hello` MPI minimal et des essais `srun` et `mpirun` pour isoler le problème de rangs. Le carnet en garde les commandes et les résultats.
+
 ## Correspondance GitLab
 
 Le cours décrit GitLab CI et ce dépôt utilise GitHub Actions. Voici les notions employées, avec leur équivalent.
@@ -400,25 +427,6 @@ Pour un code de recherche, la valeur est de séparer deux choses qui se mélange
 Pour un calcul lourd, la chaîne CI vers Slurm permet de tester petit sur un conteneur, puis de lancer le vrai calcul sur la partition adaptée, avec un journal et des artefacts qui restent.
 
 Pour un rendu ou une publication, le carnet et l'historique Git donnent la trace des erreurs, ce qui vaut mieux qu'un résultat propre sans explication.
-
-## Mission 5 - Rendu
-
-Le dépôt est public, il se clone donc sans invitation ni compte :
-
-```
-git clone https://github.com/gnoooo/chps0902_visualization_devops
-```
-
-Le tag `seance-inversee` marque l'état rendu, carnet compris :
-
-```
-git tag -l
-git checkout seance-inversee
-```
-
-Le carnet est le fichier `carnet-de-bord.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
-
-Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite. Le dernier run vert complet est celui du commit qui porte le tag `seance-inversee`, dans l'onglet Actions du dépôt.
 
 
 
