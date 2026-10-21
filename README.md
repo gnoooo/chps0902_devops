@@ -366,9 +366,11 @@ git tag -l
 git checkout seance-inversee
 ```
 
-Le carnet est le fichier `carnet-de-bord.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
+Le carnet est le fichier `README.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
 
 Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite. Le dernier run vert complet est le run 39588631105, sur le commit `55028f9`. Les commits suivants ne touchent que le carnet.
+
+Les numéros de run cités dans ce carnet viennent du dépôt précédent, nommé `chps0902_visualization_devops`, supprimé depuis. Les extraits de logs sont recopiés ici, et le tag `v0.1.0` a été repoussé sur le dépôt actuel, ce qui a relancé le pipeline.
 
 Les scripts de diagnostic écrits sur le noeud de login n'ont pas été commités et ont disparu avec le cluster. C'étaient un `hello` MPI minimal et des essais `srun` et `mpirun` pour isoler le problème de rangs. Le carnet en garde les commandes et les résultats.
 
