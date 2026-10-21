@@ -41,6 +41,10 @@ jobs:
           name: build
           path: build/
 
+      # upload-artifact ne conserve pas le bit executable
+      - name: droits d execution
+        run: chmod +x build/bcast
+
       - name: dependances
         run: apt-get update && apt-get install -y --no-install-recommends cmake libopenmpi-dev
 
