@@ -418,4 +418,7 @@ git checkout seance-inversee
 
 Le carnet est le fichier `carnet-de-bord.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
 
+Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite. Le dernier run vert complet est celui du commit qui porte le tag `seance-inversee`, dans l'onglet Actions du dépôt.
+
+
 
