@@ -10,8 +10,8 @@
 set -e
 cd "$SLURM_SUBMIT_DIR"
 
-# l'image fournit Lmod mais un job n'est pas une session de login
-source /etc/profile.d/z00_lmod.sh
+# un job batch ne passe pas par /etc/profile, on initialise Spack et Lmod a la main
+for f in 01-spack z00_lmod z00_spack_lmod; do . "/etc/profile.d/$f.sh"; done
 module load openmpi
 
 srun ./build/bcast
