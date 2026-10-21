@@ -31,10 +31,10 @@ $ ctest --test-dir build --output-on-failure
 100% tests passed, 0 tests failed out of 1
 ```
 
-Dans le job `test` du run 39573283731 :
+Dans le job `test` du run 39604040524 :
 
 ```
-1/1 Test #1: bcast_np4 ........................   Passed    0.33 sec
+1/1 Test #1: bcast_np4 ........................   Passed    0.34 sec
 100% tests passed, 0 tests failed out of 1
 MPI_Bcast OK sur 4 rangs
 ```
@@ -71,7 +71,7 @@ Dans le conteneur, les quatre rangs sont des processus sur une seule machine, sa
 
 Sans `needs`, les deux jobs démarrent en même temps. Le job `test` peut donc arriver à l'étape de téléchargement avant que le job `build` ait publié son artefact. `download-artifact` échoue alors avec `Unable to find any artifacts for the associated workflow`.
 
-L'expérience l'a confirmé à moitié, et c'est instructif. Sur le run 39574168499, build et test ont démarré à 09:04:53. Le build a publié à 09:05:21 et le téléchargement a eu lieu à 09:05:24. Le test est passé, mais par chance, parce que l'initialisation du conteneur a retardé le téléchargement de trente secondes. Sans ce délai, le téléchargement serait arrivé avant la publication et le job aurait échoué. Le problème n'est donc pas une règle mais une course. `needs` supprime la course, rend la dépendance explicite et permet aussi de ne pas lancer le test quand le build échoue.
+L'expérience l'a confirmé à moitié, et c'est instructif. Sur un run où `needs` était retiré, build et test ont démarré à 09:04:53. Le build a publié à 09:05:21 et le téléchargement a eu lieu à 09:05:24. Le test est passé, mais par chance, parce que l'initialisation du conteneur a retardé le téléchargement de trente secondes. Sans ce délai, le téléchargement serait arrivé avant la publication et le job aurait échoué. Le problème n'est donc pas une règle mais une course. `needs` supprime la course, rend la dépendance explicite et permet aussi de ne pas lancer le test quand le build échoue. Cette observation date de l'ancien dépôt, elle n'a pas été rejouée ici parce qu'une course ne se reproduit pas à la demande.
 
 
 
@@ -103,10 +103,11 @@ Sur la pull request 1, le job lint tourne et passe :
 lint success
 build success
 test success
+test_hpc skipped
 package skipped
 ```
 
-Sur le push du tag `v0.1.0`, seul le package est ajouté :
+Sur le push du tag `v0.1.0`, run 39592079121, seul le package est ajouté :
 
 ```
 build success
@@ -118,10 +119,10 @@ lint skipped
 Le package produit une empreinte vérifiable :
 
 ```
-af5e656487fd737efc14349ad5855463fdd0bc902e5a0f9e44aa42eb5c7e31c3  bcast-v0.1.0.tar.gz
+18db22c7643d4b122c6776c3dc89250638f9c1691998b35da3bfe5cd52843f30  bcast-v0.1.0.tar.gz
 ```
 
-Sur le run manuel 39573937102, le secret est masqué par la plateforme :
+Sur le run manuel 39604281725, le secret est masqué par la plateforme :
 
 ```
 env:
@@ -175,6 +176,8 @@ Le cluster du Cours 5 a été redéployé sur GCP avec le blueprint `hpc-slurm.y
 Le pare-feu du réseau n'ouvre le port 22 qu'aux plages IAP de Google. Un runner hébergé par GitHub ne peut donc pas se connecter au login par SSH. J'ai installé un runner auto-hébergé sur le noeud de login, avec le label `hpc-login` et un service systemd.
 
 Deux jobs utilisent ce runner. `test_hpc` compile sur le login, soumet `slurm/job_ci.sh` avec `sbatch --parsable`, puis interroge `sacct` toutes les trente secondes jusqu'à un état terminal. Il porte `timeout-minutes: 45` et publie `ci-*.out` avec `if: always()`. `test_hpc_wait` fait la même chose en une ligne avec `sbatch --wait` et ne tourne que sur `workflow_dispatch`, pour comparer les deux façons d'attendre.
+
+Les deux jobs portent aussi la condition `if: vars.HPC_RUNNER == 'on'`, ajoutée après la destruction du cluster. La variable n'existe pas sur le dépôt, ils sortent donc en `skipped` et le run se termine proprement au lieu de rester en file sans runner. Recréer la variable sur un cluster redéployé suffit à les rallumer, le code des jobs n'a pas bougé.
 
 Le script `slurm/job_ci.sh` porte les en-têtes SBATCH, charge Lmod, reconstruit la liste des noeuds avec `scontrol show hostnames`, puis lance `mpirun` sur cette liste.
 
@@ -413,7 +416,9 @@ git checkout seance-inversee
 
 Le carnet est le fichier `README.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
 
-Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite (pour éviter de tomber malencontreusement à court de crédits). Le dernier run valide complet est le run 39588631105, sur le commit `55028f9`. Les commits suivants ne touchent que le carnet.
+Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite (pour éviter de tomber malencontreusement à court de crédits). Ils portent une condition sur la variable `HPC_RUNNER`, absente, et sortent donc en `skipped`. Les runs 39582070775 et 39582567650 cités en mission 3 viennent de l'ancien dépôt, nommé `chps0902_visualization_devops`, supprimé depuis, leurs logs sont recopiés dans le carnet.
+
+Le dernier run vert de ce dépôt est le run 39604040524, sur le commit `39dd6af`, avec build et test réussis et les jobs HPC ignorés.
 
 ## Correspondance GitLab
 
