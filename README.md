@@ -3,7 +3,7 @@
 Cours 6 DevOps pour le HPC, M2 CHPS, séance en pédagogie inversée.
 
 Date : 21 octobre 2026 \
-Dépôt : https://github.com/gnoooo/chps0902_visualization_devops
+Dépôt : https://github.com/gnoooo/chps0902_devops
 
 ## Mission 1 - Pipeline minimal
 
@@ -356,7 +356,7 @@ Ce que je referais autrement, vérifier la cible et le chemin réel de l'upstrea
 Le dépôt est public, il se clone donc sans invitation ni compte :
 
 ```
-git clone https://github.com/gnoooo/chps0902_visualization_devops
+git clone https://github.com/gnoooo/chps0902_devops
 ```
 
 Le tag `seance-inversee` marque l'état rendu, carnet compris :
