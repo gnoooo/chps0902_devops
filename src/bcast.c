@@ -22,6 +22,8 @@ int main(int argc, char **argv)
         if (data[i] != i * 10)
             errors++;
 
+    printf("rang %d recoit %d\n", rank, data[0]);
+
     if (rank == 0)
         printf("MPI_Bcast OK sur %d rangs\n", size);
 
