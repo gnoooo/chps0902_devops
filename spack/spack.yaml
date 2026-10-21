@@ -1,0 +1,19 @@
+spack:
+  specs:
+  - openmpi@5.0.8%gcc target=x86_64_v3
+  - cmake@3.31.9%gcc target=x86_64_v3
+
+  concretizer:
+    unify: true
+
+  # les paquets deja installes par le cluster evite de recompiler sur le login
+  upstreams:
+    system:
+      install_tree: /opt/apps/spack/opt/spack/__spack_path_placeholder__/__spack_path_placeholder__/__spack_path_placeholder__/__spack_path_placehol
+
+  # install_tree utilisateur, /opt/apps/spack n'est pas inscriptible
+  config:
+    install_tree:
+      root: $HOME/.spack/opt/spack
+    source_cache: $HOME/.spack/cache
+    misc_cache: $HOME/.spack/cache
