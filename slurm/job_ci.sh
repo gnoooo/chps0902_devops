@@ -3,8 +3,9 @@
 #SBATCH --output=ci-%j.out
 #SBATCH --partition=debug
 #SBATCH --nodes=2
-#SBATCH --ntasks=4
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --mem=0
 #SBATCH --time=00:10:00
 
 set -e
