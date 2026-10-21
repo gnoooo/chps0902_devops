@@ -2,7 +2,7 @@
 
 Cours 6 DevOps pour le HPC, M2 CHPS, séance en pédagogie inversée.
 
-Date : 21 octobre 2026
+Date : 21 octobre 2026 \
 Dépôt : https://github.com/gnoooo/chps0902_visualization_devops
 
 ## Mission 1 - Pipeline minimal
