@@ -85,7 +85,7 @@ jobs:
           echo "job soumis $JOBID"
           while true; do
             STATE=$(sacct -j "$JOBID" -n -o State | head -1 | tr -d ' ')
-            echo "$(date +%H:%M:%S) job $JOBID $STATE"
+            echo "$(date +%H:%M:%S) job $JOBID $STATE $(squeue -h -j "$JOBID" -o %r)"
             case "$STATE" in
               COMPLETED|FAILED|TIMEOUT|CANCELLED|NODE_FAIL|OUT_OF_MEMORY) break ;;
             esac
