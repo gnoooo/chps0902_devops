@@ -60,8 +60,10 @@ jobs:
         run: mpirun --allow-run-as-root --oversubscribe -np 4 ./build/bcast
 
   # le runner heberge tourne sur le noeud de login du cluster GCP
+  # sans cluster la variable HPC_RUNNER est absente, le job est ignore
   test_hpc:
     needs: build
+    if: vars.HPC_RUNNER == 'on'
     runs-on: [self-hosted, hpc-login]
     timeout-minutes: 45
     steps:
@@ -103,7 +105,7 @@ jobs:
 
   # meme chose en trois lignes, lancee a la main pour comparer
   test_hpc_wait:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && vars.HPC_RUNNER == 'on'
     runs-on: [self-hosted, hpc-login]
     timeout-minutes: 45
     steps:
