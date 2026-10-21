@@ -18,9 +18,12 @@ int main(int argc, char **argv)
 
     MPI_Bcast(data, N, MPI_INT, 0, MPI_COMM_WORLD);
 
-    for (i = 0; i < N; i++)
-        if (data[i] != i * 10)
+    for (i = 0; i < N; i++) {
+        if (data[i] != i * 10) {
+            printf("rang %d valeur %d attendue %d\n", rank, data[i], i * 10);
             errors++;
+        }
+    }
 
     printf("rang %d recoit %d\n", rank, data[0]);
 
