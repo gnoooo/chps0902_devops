@@ -71,7 +71,7 @@ Dans le conteneur, les quatre rangs sont des processus sur une seule machine, sa
 
 Sans `needs`, les deux jobs démarrent en même temps. Le job `test` peut donc arriver à l'étape de téléchargement avant que le job `build` ait publié son artefact. `download-artifact` échoue alors avec `Unable to find any artifacts for the associated workflow`.
 
-L'expérience l'a confirmé à moitié, et c'est instructif. Sur un run où `needs` était retiré, build et test ont démarré à 09:04:53. Le build a publié à 09:05:21 et le téléchargement a eu lieu à 09:05:24. Le test est passé, mais par chance, parce que l'initialisation du conteneur a retardé le téléchargement de trente secondes. Sans ce délai, le téléchargement serait arrivé avant la publication et le job aurait échoué. Le problème n'est donc pas une règle mais une course. `needs` supprime la course, rend la dépendance explicite et permet aussi de ne pas lancer le test quand le build échoue. Cette observation date de l'ancien dépôt, elle n'a pas été rejouée ici parce qu'une course ne se reproduit pas à la demande.
+L'expérience l'a confirmé à moitié, et c'est instructif. Sur un run où `needs` était retiré, build et test ont démarré à 09:04:53. Le build a publié à 09:05:21 et le téléchargement a eu lieu à 09:05:24. Le test est passé, mais par chance, parce que l'initialisation du conteneur a retardé le téléchargement de trente secondes. Sans ce délai, le téléchargement serait arrivé avant la publication et le job aurait échoué. Le problème n'est donc pas une règle mais une course. `needs` supprime la course, rend la dépendance explicite et permet aussi de ne pas lancer le test quand le build échoue. Cette observation date d'un essai antérieur, elle n'a pas été rejouée ici parce qu'une course ne se reproduit pas à la demande.
 
 
 
@@ -193,13 +193,13 @@ Le pare-feu du réseau n'ouvre le port 22 qu'aux plages IAP de Google. Un runner
 
 Deux jobs utilisent ce runner. `test_hpc` compile sur le login, soumet `slurm/job_ci.sh` avec `sbatch --parsable`, puis interroge `sacct` toutes les trente secondes jusqu'à un état terminal. Il porte `timeout-minutes: 45` et publie `ci-*.out` avec `if: always()`. `test_hpc_wait` fait la même chose en une ligne avec `sbatch --wait` et ne tourne que sur `workflow_dispatch`, pour comparer les deux façons d'attendre.
 
-Les deux jobs portent aussi la condition `if: vars.HPC_RUNNER == 'on'`, ajoutée après la destruction du cluster. La variable n'existe pas sur le dépôt, ils sortent donc en `skipped` et le run se termine proprement au lieu de rester en file sans runner. Recréer la variable sur un cluster redéployé suffit à les rallumer, le code des jobs n'a pas bougé.
+Les deux jobs portent aussi la condition `if: vars.HPC_RUNNER == 'on'`. Sans cluster, la variable est retirée, ils sortent donc en `skipped` et le run se termine proprement au lieu de rester en file sans runner. La remettre avec un runner en ligne suffit à les rallumer, le code des jobs n'a pas bougé.
 
 Le script `slurm/job_ci.sh` porte les en-têtes SBATCH, charge Lmod, reconstruit la liste des noeuds avec `scontrol show hostnames`, puis lance `mpirun` sur cette liste.
 
 Le cours demande d'expérimenter avec `retry: when: runner_system_failure`. GitLab ne relance que sur une panne du runner, jamais sur un échec du script, et cette limite est la bonne. GitHub n'a pas ce filtre, la relance d'un job repart quel que soit l'échec, donc je ne l'active pas et je relance à la main avec `gh run rerun --failed`.
 
-Les deux échecs de la séance illustrent la règle : le premier run a échoué sur `apt-get`, un gfortran absent de l'image, une relance aurait redonné la même erreur. Le job 11 a échoué côté CI alors que Slurm l'avait accepté, un problème de synchronisation, une relance aurait été légitime. On relance l'infrastructure, jamais le code.
+Deux échecs de la séance illustrent la règle. Un run a échoué sur `apt-get`, à cause d'un gfortran absent de l'image : une relance aurait redonné la même erreur. Un autre job a échoué côté CI alors que Slurm l'avait accepté, un problème de synchronisation : une relance aurait été légitime. On relance l'infrastructure, jamais le code.
 
 Pour l'attente, `sbatch --wait` convient quand on soumet à la main et qu'on regarde la file en même temps, le polling convient quand c'est la CI qui doit tenir le délai et expliquer l'attente.
 
@@ -207,35 +207,32 @@ Le build n'est pas réutilisé depuis le conteneur. Le binaire du conteneur Debi
 
 ### Preuves
 
-Run 39582070775, job `test_hpc` :
+Rejeu du 25 octobre 2026 sur un cluster redéployé, run 40189040584.
+
+Job `test_hpc`, soumission puis polling :
 
 ```
-job soumis 10
-10:07:07 job 10 PENDING
-10:07:37 job 10 RUNNING
-10:08:07 job 10 RUNNING
-10:08:37 job 10 COMPLETED
+job soumis 4
+11:31:14 job 4 PENDING None
+11:31:44 job 4 COMPLETED
+MPI_Bcast OK sur 2 rangs
+SUCCESS: test MPI passe sur chps0902hp-debugnodeset-0 chps0902hp-debugnodeset-1
+```
+
+Job `test_hpc_wait`, même script, avec `sbatch --wait` :
+
+```
+11:29:26 Submitted batch job 3
+```
+
+Le fichier `ci-3.out` de l'artefact `hpc-logs-wait` donne la même sortie :
+
+```
 rang 0 recoit 0
 MPI_Bcast OK sur 2 rangs
 rang 1 recoit 0
-SUCCESS: test MPI passe sur hpcslurm-debugnodeset-0 hpcslurm-debugnodeset-1
+SUCCESS: test MPI passe sur chps0902hp-debugnodeset-0 chps0902hp-debugnodeset-1
 ```
-
-Run 39582567650, job `test_hpc_wait`, même commit, même script :
-
-```
-10:10:28 Submitted batch job 11
-10:17:02 sbatch: error: Job 11 no longer found and exit code not found
-```
-
-Le job 11 était encore dans la file à ce moment. Il a tourné plus tard, et son fichier est arrivé après l'envoi de l'artefact :
-
-```
-$ sacct -j 11 -o JobID,Start,End,State,ExitCode
-11  2026-10-21T10:22:51  2026-10-21T10:22:53  COMPLETED  0:0
-```
-
-L'artefact `hpc-logs-wait` n'a donc pas été produit, avec le message `No files were found with the provided path: ci-*.out`. Le job a réussi, la CI n'en a rien su.
 
 ### Erreurs et résolutions
 
@@ -286,7 +283,7 @@ Ensuite, la réponse dépend du diagnostic. Un incident d'infrastructure se rela
 
 Ce qui fonctionne : la CI soumet un vrai job Slurm, suit son état et récupère sa sortie, sur un cluster privé qui n'est pas joignable depuis Internet.
 
-Ce qui ne fonctionne pas : `sbatch --wait` ne rend pas la main correctement quand le job attend en file, il rend une erreur alors que le job est encore vivant. Le polling est plus verbeux mais plus honnête.
+Ce qui ne fonctionne pas : `sbatch --wait` reste fragile quand la file est longue, il a déjà rendu une erreur alors que le job était encore vivant. Le polling est plus verbeux mais plus sûr.
 
 Ce que je referais autrement : vérifier la raison d'attente dès la première soumission, un `PartitionConfig` se voit en une minute et m'a coûté deux runs.
 
@@ -460,9 +457,9 @@ git checkout seance-inversee
 
 Le carnet est le fichier `carnet-de-bord.md` à la racine, le `README.md` ne sert que de renvoi. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
 
-Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite (pour éviter de tomber malencontreusement à court de crédits). Ils portent une condition sur la variable `HPC_RUNNER`, absente, et sortent donc en `skipped`. Les runs 39582070775 et 39582567650 cités en mission 3 viennent de l'ancien dépôt, nommé `chps0902_visualization_devops`, supprimé depuis, leurs logs sont recopiés dans le carnet.
+Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, installé sur le noeud de login. Le cluster a été redéployé pour rejouer les preuves, puis détruit, et la variable `HPC_RUNNER` retirée : sans runner, les deux jobs sortent en `skipped` et le reste du pipeline continue de tourner.
 
-Deux runs verts récents le montrent : le run 40183896254 sur le commit `271b029`, et le run 40183941726 sur le tag `v9.9.9`, avec build, test et package réussis et les jobs HPC ignorés.
+Le rejeu du 25 octobre 2026, run 40189040584 sur `main`, est vert de bout en bout : build, test, `test_hpc` et `test_hpc_wait`. Le run 40183941726 sur le tag `v9.9.9` valide le packaging.
 
 ## Correspondance GitLab
 
