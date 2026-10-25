@@ -89,7 +89,7 @@ Ce que je referais autrement : poser `needs` dès le premier jet et tester les p
 
 Un job `lint` lance `cppcheck --enable=warning,style --error-exitcode=1 src/`. Il a la condition `if: github.event_name == 'pull_request'`, donc il se lance que sur une pull request.
 
-Un job `package` crée `bcast-<tag>.tar.gz`, calcule son empreinte avec `sha256sum` et publie les deux fichiers en artefact. Il a la condition `if: startsWith(github.ref, 'refs/tags/v')` et déclare `needs: build`, il se lance donc s'il y a un tag avec la typo `vX.Y.Z` (et a besoin de l'étape de `build` aussi).
+Un job `package` crée `bcast-<tag>.tar.gz`, calcule son empreinte avec `sha256sum` et publie les deux fichiers en artefact. Le format du tag est vérifié au déclencheur par `on: push: tags: ['v[0-9]+.[0-9]+.[0-9]+']`, et le job ajoute `if: startsWith(github.ref, 'refs/tags/')` avec `needs: build` : il ne peut donc se lancer que sur un tag `vX.Y.Z`, une fois le build passé.
 
 Un job `secret_demo` ne tourne que sur `workflow_dispatch`. Il lit le secret `FAKE_REGISTRY_TOKEN` et le passe à `docker login` par `--password-stdin`, vers un registre qui n'existe pas. L'échec du login est attendu, le but est de voir si la valeur fuit dans les logs.
 
@@ -133,6 +133,18 @@ secret present en variable, non affiche dans les logs
 
 La valeur n'apparaît nulle part dans le journal du job.
 
+Le filtre de tag a été vérifié sur le commit `271b029` en poussant deux tags : `vfoo`, refusé dès le déclencheur, aucun run ; puis `v9.9.9`, qui lance build, test et package, run 40183941726, tout vert :
+
+```
+build success
+test success
+package success
+lint skipped
+test_hpc skipped
+test_hpc_wait skipped
+secret_demo skipped
+```
+
 ### Erreurs et résolutions
 
 Le login vers `registry.invalid` échoue et c'est voulu. La première version du job sortait en erreur et salissait le pipeline. 
@@ -141,11 +153,15 @@ Le login vers `registry.invalid` échoue et c'est voulu. La première version du
 
 La pull request d'expérience sur `needs` a été fermée sans fusion, puis la branche a été supprimée pour ne pas laisser de code faux dans le dépôt.
 
+Le premier filtre de tag était `tags: ['v*']` avec `if: startsWith(github.ref, 'refs/tags/v')`. Il accepte `vfoo` et lance tout le pipeline, build et test compris, pour un tag qui ne respecte pas `vX.Y.Z`.
+
+> Résolution, resserrer le déclencheur avec `tags: ['v[0-9]+.[0-9]+.[0-9]+']` et ne garder dans le job que `if: startsWith(github.ref, 'refs/tags/')`. Le motif ressemble à une expression régulière mais GitHub n'en accepte pas dans `on:` : c'est un glob, où `+` signifie un ou plusieurs du caractère précédent et `.` reste littéral. Vérifié avec `vfoo`, aucun run, et `v9.9.9`, package réussi.
+
 ### Réponses aux questions
 
 **`rules` contre `only` et `except`, lequel écrire aujourd'hui, et où retrouver l'autre ?**
 
-On écrit `rules` dans GitLab. `only` et `except` sont dépréciés, ils ne servent plus que dans les dépôts anciens et la documentation historique. Dans ce dépôt GitHub, l'équivalent de `rules` est la combinaison de `on:` pour le déclencheur et de `if:` pour la condition, ce qui donne ici `if: github.event_name == 'pull_request'` et `if: startsWith(github.ref, 'refs/tags/v')`.
+On écrit `rules` dans GitLab. `only` et `except` sont dépréciés, ils ne servent plus que dans les dépôts anciens et la documentation historique. Dans ce dépôt GitHub, l'équivalent de `rules` est la combinaison de `on:` pour le déclencheur et de `if:` pour la condition, ce qui donne ici `if: github.event_name == 'pull_request'` et, pour les tags, `on: push: tags: ['v[0-9]+.[0-9]+.[0-9]+']` avec `if: startsWith(github.ref, 'refs/tags/')`.
 
 ---
 
@@ -442,11 +458,11 @@ git tag -l
 git checkout seance-inversee
 ```
 
-Le carnet est le fichier `README.md` à la racine. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
+Le carnet est le fichier `carnet-de-bord.md` à la racine, le `README.md` ne sert que de renvoi. Le code est dans `src/`, le pipeline dans `.github/workflows/ci.yml`, le script Slurm dans `slurm/` et l'environnement Spack dans `spack/`.
 
 Les jobs `test_hpc` et `test_hpc_wait` ont besoin du runner auto-hébergé, qui vit sur le noeud de login. Le cluster est détruit en fin de séance pour ne pas payer, donc ces deux jobs ne peuvent plus tourner ensuite (pour éviter de tomber malencontreusement à court de crédits). Ils portent une condition sur la variable `HPC_RUNNER`, absente, et sortent donc en `skipped`. Les runs 39582070775 et 39582567650 cités en mission 3 viennent de l'ancien dépôt, nommé `chps0902_visualization_devops`, supprimé depuis, leurs logs sont recopiés dans le carnet.
 
-Le dernier run vert de ce dépôt est le run 39604040524, sur le commit `39dd6af`, avec build et test réussis et les jobs HPC ignorés.
+Deux runs verts récents le montrent : le run 40183896254 sur le commit `271b029`, et le run 40183941726 sur le tag `v9.9.9`, avec build, test et package réussis et les jobs HPC ignorés.
 
 ## Correspondance GitLab
 
@@ -458,7 +474,7 @@ Les artefacts et `needs` gardent le même rôle, avec `actions/upload-artifact` 
 
 `rules` avec `merge_request_event` devient `on: pull_request` plus un `if` sur `github.event_name`.
 
-`rules` avec une expression régulière de tag devient un filtre `on: push: tags` plus un `if` sur `startsWith(github.ref, 'refs/tags/v')`.
+`rules` avec une expression régulière de tag devient un filtre `on: push: tags` avec un glob, où `+` veut dire un ou plusieurs du caractère précédent, plus un `if` sur `startsWith(github.ref, 'refs/tags/')`.
 
 `only` et `except` n'ont pas d'équivalent, le filtrage se fait dans `on:` et dans `if:`.
 
